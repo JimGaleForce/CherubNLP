@@ -281,7 +281,7 @@ namespace CherubNLP.Models
 
 		protected internal override Synset CreateSynset(string partOfSpeech, int synsetOffset)
 		{
-			StreamReader dataFile = _dataFileDictionary[partOfSpeech].DataFile;
+			StreamReader dataFile = PosDataFileSet.Clone(_dataFileDictionary[partOfSpeech]).DataFile;
 			dataFile.DiscardBufferedData();
 			dataFile.BaseStream.Seek(synsetOffset, SeekOrigin.Begin);
 			string record = dataFile.ReadLine();
