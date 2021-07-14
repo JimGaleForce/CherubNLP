@@ -17,6 +17,8 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace CherubNLP.Models
 {
@@ -28,6 +30,7 @@ namespace CherubNLP.Models
 		private readonly Dictionary<string, PosDataFileSet> _dataFileDictionary;
 		private string[] _lexicographerFiles;
 		private Dictionary<string, RelationType> _relationTypeDictionary;
+		private static ThreadedResource<PosDataFileSet> threadedResource = new ThreadedResource<PosDataFileSet>();
 
 		// Public Methods (class specific) ------------------
 		public string DataFolder { get; }
@@ -70,7 +73,7 @@ namespace CherubNLP.Models
 			var partsOfSpeech = new List<string>();
 			foreach(string partOfSpeech in _dataFileDictionary.Keys)
 			{
-				if(BinarySearch(lemma, PosDataFileSet.Clone(_dataFileDictionary[partOfSpeech]).IndexFile) != null)
+				if(BinarySearch(lemma, threadedResource.GetCopyOf(_dataFileDictionary[partOfSpeech]).IndexFile) != null)
 				{
 					partsOfSpeech.Add(partOfSpeech);
 				}
@@ -80,7 +83,7 @@ namespace CherubNLP.Models
 
 		public override IndexWord[] GetAllIndexWords(string partOfSpeech)
 		{
-			StreamReader searchFile = PosDataFileSet.Clone(_dataFileDictionary[partOfSpeech]).IndexFile;
+			StreamReader searchFile = threadedResource.GetCopyOf(_dataFileDictionary[partOfSpeech]).IndexFile;
 			string line;
 			string space = " ";
 			var indexWords = new List<IndexWord>();
@@ -99,7 +102,7 @@ namespace CherubNLP.Models
 
 		public override IndexWord GetIndexWord(string lemma, string partOfSpeech)
 		{
-			var pdfs = PosDataFileSet.Clone(_dataFileDictionary[partOfSpeech]);
+			var pdfs = threadedResource.GetCopyOf(_dataFileDictionary[partOfSpeech]);
 
 			string line = BinarySearch(lemma, pdfs.IndexFile);
 			if(line != null)
@@ -281,7 +284,7 @@ namespace CherubNLP.Models
 
 		protected internal override Synset CreateSynset(string partOfSpeech, int synsetOffset)
 		{
-			StreamReader dataFile = PosDataFileSet.Clone(_dataFileDictionary[partOfSpeech]).DataFile;
+			StreamReader dataFile = threadedResource.GetCopyOf(_dataFileDictionary[partOfSpeech]).DataFile;
 			dataFile.DiscardBufferedData();
 			dataFile.BaseStream.Seek(synsetOffset, SeekOrigin.Begin);
 			string record = dataFile.ReadLine();
@@ -375,7 +378,9 @@ namespace CherubNLP.Models
 
 		protected internal override string[] GetExceptionForms(string lemma, string partOfSpeech)
 		{
-			string line = BinarySearch(lemma, PosDataFileSet.Clone(_dataFileDictionary[partOfSpeech]).ExceptionFile);
+			string line = BinarySearch(
+				lemma,
+				threadedResource.GetCopyOf(_dataFileDictionary[partOfSpeech]).ExceptionFile);
 			if(line != null)
 			{
 				var exceptionForms = new List<string>();
@@ -559,7 +564,7 @@ namespace CherubNLP.Models
 			//moRelationTypeDictionary.Add("-", new RelationType("Member of this domain", new string[] {"noun"})); 
 		}
 
-		private class PosDataFileSet
+		private class PosDataFileSet : IThreadedResource<PosDataFileSet>
 		{
 			private readonly string _dataFolder;
 			private readonly string _partOfSpeech;
@@ -580,8 +585,35 @@ namespace CherubNLP.Models
 				ExceptionFile = new StreamReader(Path.Combine(dataFolder, partOfSpeech + ".exc"));
 			}
 
-			public static PosDataFileSet Clone(PosDataFileSet set)
-			{ return new PosDataFileSet(set._dataFolder, set._partOfSpeech); }
+			public PosDataFileSet CloneX() { return new PosDataFileSet(this._dataFolder, this._partOfSpeech); }
+		}
+
+		public class ThreadedResource<T>
+			where T : IThreadedResource<T>
+		{
+			private static Dictionary<int, T> resources = new Dictionary<int, T>();
+
+			public T GetCopyOf(T original)
+			{
+				lock(resources)
+				{
+					var id = Thread.CurrentThread.ManagedThreadId; // Task.CurrentId ?? 0;
+					if(!resources.ContainsKey(id))
+					{
+						Console.WriteLine($"new resource for id{id}");
+						resources.Add(id, original.CloneX());
+					}
+
+					return resources[id];
+				}
+			}
+
+			public void Clear() { resources.Clear(); }
+		}
+
+		public interface IThreadedResource<T>
+		{
+			T CloneX();
 		}
 	}
 }
