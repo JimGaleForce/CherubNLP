@@ -17,6 +17,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -63,6 +64,8 @@ namespace CherubNLP.Models
 
 			InitializeRelationTypes();
 		}
+
+		public void ClearResources(TimeSpan ts) { threadedResource.Clear(ts); }
 
 		// abstract methods implementation ------------------
 
@@ -592,6 +595,7 @@ namespace CherubNLP.Models
 			where T : IThreadedResource<T>
 		{
 			private static Dictionary<int, T> resources = new Dictionary<int, T>();
+			private static Dictionary<int, DateTime> used = new Dictionary<int, DateTime>();
 
 			public T GetCopyOf(T original)
 			{
@@ -602,13 +606,40 @@ namespace CherubNLP.Models
 					{
 						Console.WriteLine($"new resource for id{id}");
 						resources.Add(id, original.CloneX());
+						used.Add(id, DateTime.UtcNow);
 					}
 
+					used[id] = DateTime.UtcNow;
 					return resources[id];
 				}
 			}
 
-			public void Clear() { resources.Clear(); }
+			public void Clear() { Clear(TimeSpan.MaxValue); }
+
+			public void Clear(TimeSpan span)
+			{
+				lock(resources)
+				{
+					if(span == TimeSpan.MaxValue)
+					{
+						resources.Clear();
+						used.Clear();
+					}
+					else
+					{
+						var now = DateTime.UtcNow;
+						var ms = span.TotalMilliseconds;
+						var expiredKeys = used.Where(u => now.Subtract(u.Value).TotalMilliseconds > ms)
+							.Select(u => u.Key);
+						Console.WriteLine($"clearing {expiredKeys.Count()} resources");
+						foreach(var key in expiredKeys)
+						{
+							resources.Remove(key);
+							used.Remove(key);
+						}
+					}
+				}
+			}
 		}
 
 		public interface IThreadedResource<T>
