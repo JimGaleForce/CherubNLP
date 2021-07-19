@@ -31,7 +31,8 @@ namespace CherubNLP.Models
 		private readonly Dictionary<string, PosDataFileSet> _dataFileDictionary;
 		private string[] _lexicographerFiles;
 		private Dictionary<string, RelationType> _relationTypeDictionary;
-		private static ThreadedResource<PosDataFileSet> threadedResource = new ThreadedResource<PosDataFileSet>();
+
+		//private static ThreadedResource<PosDataFileSet> threadedResource = new ThreadedResource<PosDataFileSet>();
 
 		// Public Methods (class specific) ------------------
 		public string DataFolder { get; }
@@ -65,7 +66,7 @@ namespace CherubNLP.Models
 			InitializeRelationTypes();
 		}
 
-		public void ClearResources(TimeSpan ts) { threadedResource.Clear(ts); }
+		//public void ClearResources(TimeSpan ts) { threadedResource.Clear(ts); }
 
 		// abstract methods implementation ------------------
 
@@ -76,7 +77,7 @@ namespace CherubNLP.Models
 			var partsOfSpeech = new List<string>();
 			foreach(string partOfSpeech in _dataFileDictionary.Keys)
 			{
-				if(BinarySearch(lemma, threadedResource.GetCopyOf(_dataFileDictionary[partOfSpeech]).IndexFile) != null)
+				if(BinarySearch(lemma, _dataFileDictionary[partOfSpeech].IndexFile) != null)
 				{
 					partsOfSpeech.Add(partOfSpeech);
 				}
@@ -86,7 +87,7 @@ namespace CherubNLP.Models
 
 		public override IndexWord[] GetAllIndexWords(string partOfSpeech)
 		{
-			StreamReader searchFile = threadedResource.GetCopyOf(_dataFileDictionary[partOfSpeech]).IndexFile;
+			StreamReader searchFile = _dataFileDictionary[partOfSpeech].IndexFile;
 			string line;
 			string space = " ";
 			var indexWords = new List<IndexWord>();
@@ -105,7 +106,7 @@ namespace CherubNLP.Models
 
 		public override IndexWord GetIndexWord(string lemma, string partOfSpeech)
 		{
-			var pdfs = threadedResource.GetCopyOf(_dataFileDictionary[partOfSpeech]);
+			var pdfs = _dataFileDictionary[partOfSpeech];
 
 			string line = BinarySearch(lemma, pdfs.IndexFile);
 			if(line != null)
@@ -287,7 +288,7 @@ namespace CherubNLP.Models
 
 		protected internal override Synset CreateSynset(string partOfSpeech, int synsetOffset)
 		{
-			StreamReader dataFile = threadedResource.GetCopyOf(_dataFileDictionary[partOfSpeech]).DataFile;
+			StreamReader dataFile = _dataFileDictionary[partOfSpeech].DataFile;
 			dataFile.DiscardBufferedData();
 			dataFile.BaseStream.Seek(synsetOffset, SeekOrigin.Begin);
 			string record = dataFile.ReadLine();
@@ -381,9 +382,7 @@ namespace CherubNLP.Models
 
 		protected internal override string[] GetExceptionForms(string lemma, string partOfSpeech)
 		{
-			string line = BinarySearch(
-				lemma,
-				threadedResource.GetCopyOf(_dataFileDictionary[partOfSpeech]).ExceptionFile);
+			string line = BinarySearch(lemma, _dataFileDictionary[partOfSpeech].ExceptionFile);
 			if(line != null)
 			{
 				var exceptionForms = new List<string>();
@@ -567,7 +566,7 @@ namespace CherubNLP.Models
 			//moRelationTypeDictionary.Add("-", new RelationType("Member of this domain", new string[] {"noun"})); 
 		}
 
-		private class PosDataFileSet : IThreadedResource<PosDataFileSet>
+		private class PosDataFileSet
 		{
 			private readonly string _dataFolder;
 			private readonly string _partOfSpeech;
@@ -587,64 +586,6 @@ namespace CherubNLP.Models
 				DataFile = new StreamReader(Path.Combine(dataFolder, "data." + partOfSpeech));
 				ExceptionFile = new StreamReader(Path.Combine(dataFolder, partOfSpeech + ".exc"));
 			}
-
-			public PosDataFileSet CloneX() { return new PosDataFileSet(this._dataFolder, this._partOfSpeech); }
-		}
-
-		public class ThreadedResource<T>
-			where T : IThreadedResource<T>
-		{
-			private static Dictionary<int, T> resources = new Dictionary<int, T>();
-			private static Dictionary<int, DateTime> used = new Dictionary<int, DateTime>();
-
-			public T GetCopyOf(T original)
-			{
-				lock(resources)
-				{
-					var id = Thread.CurrentThread.ManagedThreadId; // Task.CurrentId ?? 0;
-					if(!resources.ContainsKey(id))
-					{
-						Console.WriteLine($"new resource for id{id}");
-						resources.Add(id, original.CloneX());
-						used.Add(id, DateTime.UtcNow);
-					}
-
-					used[id] = DateTime.UtcNow;
-					return resources[id];
-				}
-			}
-
-			public void Clear() { Clear(TimeSpan.MaxValue); }
-
-			public void Clear(TimeSpan span)
-			{
-				lock(resources)
-				{
-					if(span == TimeSpan.MaxValue)
-					{
-						resources.Clear();
-						used.Clear();
-					}
-					else
-					{
-						var now = DateTime.UtcNow;
-						var ms = span.TotalMilliseconds;
-						var expiredKeys = used.Where(u => now.Subtract(u.Value).TotalMilliseconds > ms)
-							.Select(u => u.Key);
-						Console.WriteLine($"clearing {expiredKeys.Count()} resources");
-						foreach(var key in expiredKeys)
-						{
-							resources.Remove(key);
-							used.Remove(key);
-						}
-					}
-				}
-			}
-		}
-
-		public interface IThreadedResource<T>
-		{
-			T CloneX();
 		}
 	}
 }
